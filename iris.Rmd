@@ -1,0 +1,380 @@
+---
+title: "Iris for Botantists"
+date: "10th January 2022"
+output: 
+  html_document: 
+    code_folding: hide
+#output: github_document
+---
+
+```{r setup, include=FALSE }
+knitr::opts_chunk$set(echo = TRUE)
+library(rgl)
+library(reshape2)
+library(tidyverse)
+
+library(svglite)
+#knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE, cache.comments=FALSE, comment=NA, fig.fullwidth = TRUE, 
+#  dev = "svglite", fig.ext = ".svg", autoprint = TRUE, echo = TRUE)
+knitr::knit_hooks$set(webgl = hook_webgl, rgl = hook_rgl)
+knitr.table.format = "html"
+
+```
+
+## Brief
+*	Botanists require you to help them design an algorithm to identify flower types from four key measurements.
+*	The data is a modified version of the iris data set.
+
+[Original data](https://onlinelibrary.wiley.com/doi/10.1111/j.1469-1809.1936.tb02137.x "Link to journal")
+
+
+## Exploratory Data Analysis
+```{r,  message = FALSE, warning=FALSE}
+#Original dataset
+read.csv("https://gist.githubusercontent.com/curran/a08a1080b88344b0c8a7/raw/0e7a9b0a5d22642a06d3d5b9bcbad9890c8ee534/iris.csv") -> iris
+#Modified local dataset
+iris %>% colnames() -> org.col
+read.csv("iris_data.csv") %>% setNames(org.col) -> iris
+
+
+
+```
+### Summary Statistics
+*Iris setosa*
+
+Three anomalies appear within *Iris setosa* subgroup. Sepal length contains a max value of 5.4 meters and two empty values for sepal width and petal length.
+ 
+```{r,  message = FALSE, warning=FALSE}
+knitr::kable(summary(iris[iris$species == "setosa",]))
+```
+For row 6 with 540 cm, the sepal width is 3.9 cm and petal length is 1.7 cm. 
+```{r,  message = FALSE, warning=FALSE}
+iris %>% filter(sepal_length == 540) %>% knitr::kable()
+```
+The mean sepal length of the four other occurrences of where either are present is 5.4 cm, which will replace the existing 540cm.
+```{r,  message = FALSE, warning=FALSE}
+iris %>% filter(sepal_width == 3.9 | petal_length == 1.7) %>% knitr::kable()
+iris %>% filter(sepal_width == 3.9 | petal_length == 1.7) %>%
+  mutate(sepal_length = case_when(sepal_length == 540 ~ NA_real_, TRUE ~ sepal_length)) %>%
+    summarise(mean.sep.len = mean(sepal_length, na.rm = TRUE))  %>% knitr::kable()
+```
+Updated row 13.
+```{r,  message = FALSE, warning=FALSE}
+iris %>% mutate(sepal_length = case_when(sepal_length == 540 ~ 5.4, TRUE ~ sepal_length)) -> iris
+
+```
+The remaining issue relate to row 13 with missing values for sepal width and petal length. 
+```{r,  message = FALSE, warning=FALSE}
+iris %>% filter(is.na(sepal_width)|is.na(petal_length)) %>% knitr::kable()
+```
+Identify where sepal length is 4.8 cm and petal width is 0.1 cm and compute the mean based on flowers with the same measurement.
+```{r,  message = FALSE, warning=FALSE}
+iris %>% filter(sepal_length == 4.8 | petal_width == .1) %>% knitr::kable()
+
+
+iris %>% filter(sepal_length == 4.8 | petal_width == .1) %>%
+ 
+    summarise(mean.sep.wid = mean(sepal_width, na.rm = TRUE),
+              mean.pet.len = mean(petal_length, na.rm = TRUE))  %>% knitr::kable()
+ iris %>% mutate(sepal_width = case_when(is.na(sepal_width) ~ 3.3, TRUE ~ sepal_width)) %>%
+         mutate(petal_length = case_when(is.na(petal_length) ~ 1.5, TRUE ~ petal_length)) -> iris
+iris %>% filter(sepal_length == 4.8 & petal_width == .1) %>% knitr::kable()
+```
+
+
+
+Remaining species of *I. vericolor* and *I. virginica* have no issues.
+
+*Iris versicolor*
+```{r,  message = FALSE, warning=FALSE}
+knitr::kable(summary(iris[iris$species == "versicolor",]))
+```
+*Iris virginica*
+```{r,  message = FALSE, warning=FALSE}
+knitr::kable(summary(iris[iris$species == "virginica",]))
+```
+
+
+### Data Visualisation
+
+```{r,  message = FALSE, warning=FALSE}
+
+iris %>% mutate(id = 1:n()) -> iris 
+
+iris2 <- melt(iris, id.vars =  c("id", "species"))
+iris2 %>% rename(cm = value) -> iris2
+
+
+ggplot(iris2, aes(x = variable, y = cm, fill = variable)) +
+  geom_boxplot() +
+  facet_wrap(~species) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+
+ggplot(iris2, aes(x = variable, y = cm, fill = species)) +
+  geom_line( alpha = 0.1, aes( group = id, color = species)) +
+geom_boxplot() 
+
+   
+```
+
+## Models
+
+### Cluster Analysis
+*I. setosa* is differential but the other two species overlap preventing identification.
+
+```{r,  message = FALSE,warning=FALSE}
+ggplot(data=iris, aes(x=sepal_length, y=petal_length, color=species)) + geom_point(aes( fill = species),size =3, alpha = 1, shape = 16) 
+ggplot(data=iris, aes(x=sepal_length, y=petal_width, color=species)) +  geom_point(aes( fill = species),size =3, alpha = 1, shape = 16)  
+ggplot(data=iris, aes(x=petal_length, y=petal_width, color=species)) +  geom_point(aes( fill = species),size =3, alpha = 1, shape = 16)
+ggplot(data=iris, aes(x=petal_length, y=petal_width, color=species)) +  geom_point(aes( fill = species),size =3, alpha = 1, shape = 16) +
+  labs(x ="Petal length (cm)", y = "Petal width (cm)") +
+  #geom_vline(xintercept=2.5, linetype="dashed", color = "blue") +
+  geom_segment(aes(x = 2.5, y = 1.6, xend = 8, yend = 1.6),  linetype="dashed", color = "#C77CFF") +
+  geom_segment(aes(x = 0.8, y = 0.7, xend = 4.9, yend = 0.7),  linetype="dashed", color = "#C77CFF") +
+
+  geom_segment(aes(x = 4.9, y = 0, xend = 4.9, yend = 2.5),  linetype="dashed", color = "#00BFC4") +
+  geom_segment(aes(x = 2.5, y = 0, xend = 2.5, yend = 2.5),  linetype="dashed", color = "#00BFC4") 
+
+
+
+```
+In three dimensions
+```{r,   webgl = TRUE, echo=FALSE,warning=FALSE}
+options(rgl.useNULL=TRUE)
+library(rgl)
+rgl::setupKnitr()
+#install.packages("rgl")
+#library(rglwidget)
+
+
+colors <- c("#F8766D", "#00BA38", "#619CFF")
+iris$color <- colors[ as.numeric( as.factor(iris$species) ) ]
+
+# Plot
+plot3d( 
+  x=iris$petal_length, y=iris$petal_width, z=iris$sepal_length, 
+  col = iris$color, 
+  type = 's', 
+  radius = .1,
+  xlab="Sepal Length (cm)", ylab="Petal Width (cm)", zlab="Petal Length (cm)") 
+#-> iris.3d
+           
+```
+### Logistic Regression
+```{r,  message = FALSE,warning=FALSE}
+
+iris2 %>% filter(species != 'setosa') %>% 
+    mutate(prob = ifelse(species == "versicolor", 1, 0)) -> iris3
+
+
+ probX = function(p, model) {
+  data.frame(prob=p, 
+             xval = (qnorm(p) - coef(model)[1])/coef(model)[2])
+}
+
+ 
+log <- glm(prob ~ cm, data=iris3[iris3$variable == 'petal_width',], family=binomial(link="logit"))
+petal.w = probX(c(0.5), log)
+petal.w$variable <-"petal_width"
+
+log <- glm(prob ~ cm, data=iris3[iris3$variable == 'petal_length',], family=binomial(link="logit"))
+petal.l = probX(0.5, log)
+petal.l$variable <-"petal_length"
+
+
+log <- glm(prob ~ cm, data=iris3[iris3$variable == 'sepal_length',], family=binomial(link="logit"))
+sepal.l = probX(0.5, log)
+sepal.l$variable <-"sepal_length"
+
+log <- glm(prob ~ cm, data=iris3[iris3$variable == 'sepal_width',], family=binomial(link="logit"))
+sepal.w = probX(0.5, log)
+sepal.w$variable <-"sepal_width"
+
+petal.w %>% bind_rows(petal.l, sepal.l, sepal.w) -> data.inter
+data.inter %>% knitr::kable()
+rm(petal.l, petal.w, sepal.w, sepal.l,log)
+iris3 %>%
+  filter(variable == "petal_width" ) %>%
+  group_by(prob) %>%
+  mutate(breaks = cut(cm, breaks=seq(0.1,2.5,0.2), labels=seq(0.2,2.5,0.2), 
+                      include.lowest=TRUE),
+         breaks = as.numeric(as.character(breaks))) %>%
+  group_by(prob, breaks) %>% 
+  summarise(n = n()) %>%
+  mutate(pct = ifelse(prob==0, n/sum(n), 1 - n/sum(n))) %>% 
+  mutate(variable = "petal_width")-> data.hist.p.w.
+
+iris3 %>%
+  filter(variable == "petal_length" ) %>%
+  group_by(prob) %>%
+  mutate(breaks = cut(cm, breaks=seq(1,6.9,0.2), 
+                      labels=seq(1.25,6.9,0.2), 
+                      include.lowest=TRUE),
+         breaks = as.numeric(as.character(breaks))) %>%
+  group_by(prob, breaks) %>% 
+  summarise(n = n()) %>%
+  mutate(pct = ifelse(prob==0, n/sum(n), 1 - n/sum(n))) %>% 
+  mutate(variable = "petal_length")-> data.hist.p.l.
+
+iris3 %>%
+  filter(variable == "sepal_width" ) %>%
+  group_by(prob) %>%
+  mutate(breaks = cut(cm, breaks=seq(2,4.4,0.2), labels=seq(2.2,4.4,0.2), 
+                      include.lowest=TRUE),
+         breaks = as.numeric(as.character(breaks))) %>%
+  group_by(prob, breaks) %>% 
+  summarise(n = n()) %>%
+  mutate(pct = ifelse(prob==0, n/sum(n), 1 - n/sum(n))) %>% 
+  mutate(variable = "sepal_width")-> data.hist.s.w.
+
+iris3 %>%
+  filter(variable == "sepal_length" ) %>%
+  group_by(prob) %>%
+  mutate(breaks = cut(cm, breaks=seq(4.3,7.9,0.2), 
+                      labels=seq(4.4,7.9,0.2), 
+                      include.lowest=TRUE),
+         breaks = as.numeric(as.character(breaks))) %>%
+  group_by(prob, breaks) %>% 
+  summarise(n = n()) %>%
+  mutate(pct = ifelse(prob==0, n/sum(n), 1 - n/sum(n))) %>% 
+  mutate(variable = "sepal_length")-> data.hist.s.l.
+
+
+
+  ggplot( ) + 
+geom_point(data  = iris3, aes(x=cm, y=prob, group = variable,fill= variable,  color = variable), alpha=.5) +
+  stat_smooth(data  = iris3,aes(x=cm, y=prob, group = variable,fill= variable,  color = variable),method="glm", 
+              method.args=list(family=binomial(link="probit"))) +
+   geom_segment(data = data.inter, aes(x=xval, xend=xval, y=0, yend=prob), colour="#619CFF",linetype = "dashed") +
+ # geom_segment(data=d, aes(x=rng[1], xend=xval, y=prob, yend=prob), colour="red") +
+  geom_text(data = data.inter, aes(label=round(xval, 1), x=xval, y=-0.03), size=3, colour="#619CFF") +
+      geom_segment(data=data.hist.p.w., size=4, show.legend=FALSE,
+                aes(x=breaks, xend=breaks, y=prob, yend=pct, color = variable), alpha = 0.3) +
+         geom_segment(data=data.hist.p.l., size=4, show.legend=FALSE,
+               aes(x=breaks, xend=breaks, y=prob, yend=pct, color = variable), alpha = 0.3) +
+      geom_segment(data=data.hist.s.w., size=4, show.legend=FALSE,
+                aes(x=breaks, xend=breaks, y=prob, yend=pct, color = variable), alpha = 0.3) +
+         geom_segment(data=data.hist.s.l., size=4, show.legend=FALSE,
+               aes(x=breaks, xend=breaks, y=prob, yend=pct, color = variable), alpha = 0.3) +
+   #  scale_y_continuous(breaks = 1:0,labels=c("I. versicolor","I. virginica")) #+
+     scale_y_continuous("Probability",breaks = c(1,0.75,0.5,0.25,0),labels=c("I. versicolor","0.75","0.5","0.25","I. virginica")) #+
+
+iris %>% filter(species != 'setosa') %>%   mutate(prob = ifelse(species == "versicolor", 1, 0)) -> iris4
+model <- glm (prob ~ .-id-species-color, data = iris4, family = binomial)
+model
+summary(model)
+plot(model)
+
+predict <- predict(model, type = 'response')
+#confusion matrix
+table(iris4$prob, predict > 0.5)
+predict(model, iris4, type="response") -> results
+table(results > 0.5)
+model <- glm (prob ~ .-id-species-color, data = iris4, family = binomial(logit))
+```
+
+
+### Decision Trees
+C50 Algorithm
+```{r,  message = FALSE,warning=FALSE}
+library(tree)
+
+tree(formula = as.factor(species) ~ petal_length + petal_width , data = iris) -> tree1
+#Number of terminal nodes:  5 
+plot(tree1)
+text(tree1)
+pred = predict(tree1, type="class")
+knitr::kable(table(iris$species,pred))
+
+plot(iris$petal_length,iris$petal_width,pch=19,col=as.numeric(as.factor(iris$species)))
+partition.tree(tree1,label="Species",add=TRUE)
+legend(1,2.5,legend=unique(as.factor(iris$species)),col=unique(as.numeric(as.factor(iris$species))),pch=19)
+
+
+tree(formula = as.factor(species) ~ petal_length + petal_width + sepal_length +sepal_width , data = iris) -> tree3
+#Number of terminal nodes:  5 
+plot(tree3)
+text(tree3)
+pred = predict(tree3, type="class")
+knitr::kable(table(iris$species,pred))
+table(iris$species,pred) -> confMat
+sum(diag(confMat))/sum(confMat)
+
+
+library('C50') # load the package
+irTree <- C5.0(iris[,-5:-7], as.factor(iris$species ))
+summary(irTree) # view the model components  
+
+plot(irTree, main = 'Iris decision tree') # view the model graphically  
+
+
+irTree <- C5.0(iris[,-5:-7], as.factor(iris$species ), rules = TRUE)
+summary(irTree) # view the model components  
+ # view the model graphically  
+
+
+```
+Classification and Regression Tree (CART)
+
+```{r,  message = FALSE,warning=FALSE}
+
+library(rpart)
+#install.packages("rattle")
+library(rattle)
+
+tree4 <- rpart(species ~ petal_length + petal_width + sepal_length +sepal_width, data=iris, method = "class")
+fancyRpartPlot(tree4, main="Iris")
+
+pred = predict(tree4, type="class")
+confMat <- table(iris$species,pred)
+knitr::kable(confMat)
+sum(diag(confMat))/sum(confMat)
+
+# plot decision tree
+
+```
+```{r,  message = FALSE,warning=FALSE, include = FALSE}
+
+iris %>% filter( petal_length < 2.5) %>% group_by(species) %>% count()
+iris %>% filter( petal_length > 4.9 | petal_width > 1.6) %>% group_by(species) %>% count()
+iris %>% filter( petal_length <= 4.9 | petal_width <= 1.6) %>% group_by(species) %>% count()
+
+iris %>% filter(petal_width >= 1.8) %>% group_by(species) %>% count()
+iris %>% filter(petal_width >= 1.75 | petal_length >= 4.95) %>% group_by(species) %>% count()
+
+iris %>% filter( petal_width < 1.6 )  %>% filter( petal_length < 4.9 ) %>% group_by(species) %>% count()
+iris %>% filter( petal_width > 1.6 )  %>% filter( petal_length > 4.9 ) %>% group_by(species) %>% count()
+
+iris %>% filter( petal_length <= 4.9 ) %>% group_by(species) %>% count()
+iris %>% filter(petal_width < 1.8) %>% group_by(species) %>% count()
+iris %>% filter(petal_width < 1.75 | petal_length < 4.95) %>% group_by(species) %>% count()
+
+iris %>% filter(petal_width < 1.631638 | petal_length < 	4.863465) %>% group_by(species) %>% count()
+iris %>% filter( petal_length <= 4.9 | petal_width <= 1.6) %>% group_by(species) %>% count()
+
+```
+
+
+
+
+In three dimensions for *I. virsicolor* and *I. virginica*.
+```{r,   webgl = TRUE, echo=FALSE,warning=FALSE}
+options(rgl.useNULL=TRUE)
+library(rgl)
+rgl::setupKnitr()
+#install.packages("rgl")
+#library(rglwidget)
+
+
+colors <- c( "#00BA38", "#619CFF")
+iris4$color <- colors[ as.numeric( as.factor(iris4$species) ) ]
+
+# Plot
+plot3d( 
+  x=iris4$petal_length, y=iris4$petal_width, z=iris4$sepal_length, 
+  col = iris$color, 
+  type = 's', 
+  radius = .1,
+  xlab="Sepal Length (cm)", ylab="Petal Width (cm)", zlab="Petal Length (cm)") 
+```
